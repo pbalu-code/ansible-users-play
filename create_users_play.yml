@@ -1,0 +1,52 @@
+---
+- hosts: all
+  become: true
+  tasks:
+    - name: Incude vars
+      include_vars:
+        file: '{{ inventory_dir }}/users.yml'
+    - name: Manage users if it is not present
+      user:
+        name: '{{ item.name }}'
+        password: '{{ item.password | default(omit) }}'
+        shell: '{{ item.shell | default(omit) }}'
+        state: '{{ item.state | default(present) }}'
+        append: "{{ item.groups is defined | ternary('yes', omit) }}"
+        group: '{{ item.group | default(omit) }}'
+        groups: '{{ item.groups | default(omit) }}'
+        remove: "{{ item.remove_homedir | default('no') }}"
+        #local: yes
+      loop: '{{ users }}'
+      loop_control:
+        label: "{{ item.name }}"
+    - name: Manage SSH authorized_keys
+      ansible.posix.authorized_key:
+        user: '{{ item.name }}'
+        key: '{{ item.pubkeys }}'
+      loop: '{{ users }}'
+      loop_control:
+        label: "{{ item.name }}"
+    - name: Set sudoers
+      lineinfile:
+        path: /etc/sudoers
+        line: '{{ item}} ALL=NOPASSWD: ALL'
+      with_items: '{{ sudoers }}'
+    - name: Remove unwanted sudoers users
+      lineinfile:
+        path: /etc/sudoers
+        state: absent
+        regexp: '^{{ item }}\s+.*ALL$'
+      with_items: '{{ rewoke_sudoers }}'
+    - name: Check access.conf is present
+      stat:
+        path: /etc/security/access.conf
+      register: accesscnf
+    - name: Manage access.conf
+      lineinfile:
+        path: /etc/security/access.conf
+        line: '+ : {{ item.name }} : ALL'
+        insertbefore: '^-\s*:\s*ALL\s*:\s*ALL.*$'
+      loop: '{{ users }}'
+      loop_control:
+        label: "{{ item.name }}"
+      when: accesscnf.stat.exists
